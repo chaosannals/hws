@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"bufio"
+	"time"
 	"path/filepath"
 
 	"github.com/cihub/seelog"
@@ -59,13 +61,53 @@ func (p *HysteriaService) Start(s service.Service) error {
 		}
 	}
 
+	// 标准输出
+	outr, outw, err := os.Pipe()
+	if err != nil {
+		p.logger.Error(err)
+		return err
+	}
+	go func() {
+		reader := bufio.NewReader(outr)
+		b := make([]byte, 1024)
+		for {
+			time.Sleep(time.Second)
+			n, err := reader.Read(b)
+			if err != nil {
+				p.logger.Error(err)
+			} else {
+				p.logger.Info(string(b[:n]))
+			}
+		}
+	}()
+
+	// 标准错误
+	errr, errw, err := os.Pipe()
+	if err != nil {
+		p.logger.Error(err)
+		return err
+	}
+	go func() {
+		reader := bufio.NewReader(errr)
+		b := make([]byte, 1024)
+		for {
+			time.Sleep(time.Second)
+			n, err := reader.Read(b)
+			if err != nil {
+				p.logger.Error(err)
+			} else {
+				p.logger.Error(string(b[:n]))
+			}
+		}
+	}()
+
 	// 启动 Hysteria
 	p.process, err = os.StartProcess("./hysteria.exe", []string{
-		// "./hysteria.exe",
+
 	}, &os.ProcAttr{
 		Dir:   wkdir,
 		Env:   os.Environ(),
-		Files: []*os.File{nil, nil, nil},
+		Files: []*os.File{nil, outw, errw},
 	})
 	if err != nil {
 		p.logger.Error(err)
