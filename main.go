@@ -20,7 +20,7 @@ func IsExists(p string) (bool, error) {
 
 func main() {
 	svcConfig := &service.Config{
-		Name:        "nws",
+		Name:        "HysteriaService",
 		DisplayName: "Hysteria Windows Service",
 		Description: "Hysteria Windows Service.",
 	}
