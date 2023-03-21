@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
-	"bufio"
-	"time"
 	"path/filepath"
+	"time"
 
 	"github.com/cihub/seelog"
 	"github.com/kardianos/service"
@@ -43,12 +43,10 @@ func NewHysteriaService() *HysteriaService {
 	}
 }
 
-//Start 开始
-func (p *HysteriaService) Start(s service.Service) error {
-	p.logger.Info("服务启动")
-
+func (p *HysteriaService) startProcess() error {
 	// 设置工作目录为 hysteria 目录
 	// wkdir := filepath.Join(p.root, "hysteria")
+	p.logger.Info("设置工作目录：")
 	wkdir := p.root
 	e, err := IsExists(wkdir)
 	if err != nil {
@@ -62,6 +60,7 @@ func (p *HysteriaService) Start(s service.Service) error {
 	}
 
 	// 标准输出
+	p.logger.Info("打开标准输出：")
 	outr, outw, err := os.Pipe()
 	if err != nil {
 		p.logger.Error(err)
@@ -82,6 +81,7 @@ func (p *HysteriaService) Start(s service.Service) error {
 	}()
 
 	// 标准错误
+	p.logger.Info("打开标准错误：")
 	errr, errw, err := os.Pipe()
 	if err != nil {
 		p.logger.Error(err)
@@ -102,17 +102,79 @@ func (p *HysteriaService) Start(s service.Service) error {
 	}()
 
 	// 启动 Hysteria
-	p.process, err = os.StartProcess("./hysteria.exe", []string{
-
-	}, &os.ProcAttr{
+	p.logger.Info("启动进程：")
+	p.process, err = os.StartProcess("./hysteria.exe", []string{}, &os.ProcAttr{
 		Dir:   wkdir,
 		Env:   os.Environ(),
 		Files: []*os.File{nil, outw, errw},
 	})
+
+	return nil
+}
+
+func (p *HysteriaService) checkProcess() (error, bool) {
+	process, err := os.FindProcess(p.process.Pid)
+	if err != nil {
+		p.logger.Warn("查找进程错误：", p.process.Pid, err)
+		return err, false
+	}
+
+	if process == nil {
+		p.logger.Warn("没有找到进程：", p.process.Pid)
+		return nil, false
+	}
+
+	// Windows 下判定进程存活，注：这个方法阻塞等待。
+	ps, err := process.Wait()
+	if err != nil {
+		p.logger.Warn("进程状态错误：", p.process.Pid, err)
+		return err, false
+	}
+
+	if ps.Exited() {
+		p.logger.Warn("进程结束了：", p.process.Pid)
+		return nil, false
+	}
+
+	// 以下的 linux 的判定进程存活的方式
+	// err = process.Signal(syscall.Signal(0))
+	// if err != nil {
+	// 	   p.logger.Warn("进程接收信号错误：", err)
+	//     return err, true
+	// }
+
+	return nil, true
+}
+
+//Start 开始
+func (p *HysteriaService) Start(s service.Service) error {
+	p.logger.Info("服务启动")
+
+	err := p.startProcess()
 	if err != nil {
 		p.logger.Error(err)
 		return err
 	}
+
+	// 进程常驻守护
+	go func() {
+		for {
+			time.Sleep(time.Second * 4)
+
+			if err, ok := p.checkProcess(); ok {
+				p.logger.Info("进程存活：", p.process.Pid)
+				time.Sleep(time.Second * 14)
+			} else {
+				p.logger.Error("进程不存在：", p.process.Pid, err)
+				err = p.startProcess()
+				if err != nil {
+					p.logger.Error("重新启动进程失败：", err)
+					time.Sleep(time.Second * 4)
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 
